@@ -1,14 +1,10 @@
-use std::{
-    fs::File,
-    io::{BufWriter, Write},
-    path::PathBuf,
-    time::Instant,
-};
+use std::{path::PathBuf, time::Instant};
 
 use chrono::Local;
+use serde::Serialize;
 
 /// Holds the state for a game
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct Game {
     /// The probability of flipping heads
     p_heads: f64,
@@ -45,7 +41,7 @@ impl Game {
             n_flips: 0,
             n_heads_in_a_row: 0,
             coin_val: 0.01,
-            multiplier: 1.0,
+            multiplier: 1.5,
             cash: 0.0,
         }
     }
@@ -74,19 +70,24 @@ impl Game {
     }
 
     /// Flip the coin until you reach `n_win` heads in a row. Also
-    /// allows setting a maximum number of iterations. If successful within
-    /// the `max_iters` then return the game state, otherwise `None`.
-    fn play(&mut self, n_win: usize, max_iters: usize) -> Option<Self> {
+    /// allows setting a maximum number of iterations. Returns the final
+    /// game state, regardless of ending. If the game did not complete in
+    /// `max_iters`, then `self.n_flips` will be set to `usize::MAX`.
+    fn play(&mut self, n_win: usize, max_iters: usize) -> Self {
         for _ in 0..max_iters {
             // Check for game completion
             if self.n_heads_in_a_row >= n_win {
-                return Some(*self);
+                return *self;
             }
 
             // Flip the coin
             self.flip();
         }
-        None
+
+        // Did not complete the game in `max_iters`, so set `self.n_flips`
+        // to `usize::MAX`, and return.
+        self.n_flips = usize::MAX;
+        *self
     }
 
     /// A stateless function for calculating the reward given the current reward, the
@@ -99,38 +100,38 @@ impl Game {
     }
 }
 
-/// Saves `data` to a CSV file named `<YYYY-MM-DDTHH-MM-SS>.csv` in the current directory.
-/// Each value is written on its own line (single-column CSV).
+/// Saves `games` to a TSV file named `<YYYY-MM-DDTHH-MM-SS>.csv` in the current directory.
 /// Returns the created file path.
 ///
 /// # Errors
 ///
 /// Will error out if the file cannot be created, or if there is an error during writing,
 /// or if the file cannot be flushed.
-fn save_usize_csv(data: &[usize]) -> std::io::Result<PathBuf> {
+fn save_game_states_tsv(games: &[Game]) -> std::io::Result<PathBuf> {
     // Format current local time as a readable timestamp
     let timestamp = Local::now().format("%Y-%m-%dT%H-%M-%S").to_string();
-    let filename = format!("{timestamp}.csv");
+    let filename = format!("{timestamp}.tsv");
     let path = PathBuf::from(&filename);
 
-    let file = File::create(&path)?;
-    let mut w = BufWriter::new(file);
+    // Create the writer, using tabs, and writing to the created path
+    let mut wtr = csv::WriterBuilder::new()
+        .delimiter(b'\t')
+        .from_path(&path)?;
 
-    // Write the header
-    writeln!(w, "n_flips")?;
-
-    for &value in data {
-        writeln!(w, "{value}")?;
+    // Write each game
+    for &g in games {
+        wtr.serialize(g)?;
     }
-    w.flush()?;
+
+    wtr.flush()?;
     Ok(path)
 }
 
 #[allow(clippy::cast_precision_loss)]
 fn main() {
     let max_iters = 2_000_000;
-    let n_games = 1_000;
-    let mut results: Vec<usize> = Vec::with_capacity(n_games);
+    let n_games = 5_000;
+    let mut results: Vec<Game> = Vec::with_capacity(n_games);
 
     let start_time = Instant::now();
 
@@ -139,21 +140,7 @@ fn main() {
 
         let end_game = game_state.play(10, max_iters);
 
-        match end_game {
-            Some(Game {
-                p_heads: _,
-                flip_time: _,
-                total_time: _,
-                n_flips,
-                n_heads_in_a_row: _,
-                coin_val: _,
-                multiplier: _,
-                cash: _,
-            }) => {
-                results.push(n_flips);
-            }
-            None => results.push(max_iters),
-        }
+        results.push(end_game);
     }
 
     let run_time = start_time.elapsed();
@@ -161,7 +148,7 @@ fn main() {
     let avg_run_time = run_time.div_f64(n_games as f64);
     println!("Ran in {run_time:?}, at about {avg_run_time:?} per game");
 
-    match save_usize_csv(&results) {
+    match save_game_states_tsv(&results) {
         Ok(path) => println!("Saved the data to {}", path.display()),
         Err(_) => println!("Failed to save the data to file. Printing here.\n\n{results:?}"),
     }
