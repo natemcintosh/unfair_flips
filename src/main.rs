@@ -3,6 +3,8 @@ use std::{path::PathBuf, time::Instant};
 use chrono::Local;
 use serde::Serialize;
 
+mod upgrades;
+
 /// Holds the state for a game
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct Game {
@@ -29,6 +31,9 @@ pub struct Game {
 
     /// Current cash
     cash: f64,
+
+    /// Current status of upgrades
+    upgrades: upgrades::PHeadsUpgradeState,
 }
 
 impl Game {
@@ -43,6 +48,7 @@ impl Game {
             coin_val: 0.01,
             multiplier: 1.5,
             cash: 0.0,
+            upgrades: upgrades::PHeadsUpgradeState::new(),
         }
     }
 
